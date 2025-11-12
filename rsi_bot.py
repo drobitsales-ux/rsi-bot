@@ -6,15 +6,17 @@ import os
 from datetime import datetime
 from threading import Thread
 
-# Змінні з Render
 TOKEN = '8317841952:AAH1dtIYJ0oh-dhpAVhudqCVZTRrBL6it1g'
 CHAT_ID = 7436397755
 
 bot = telebot.TeleBot(TOKEN)
 
-# ВИДАЛЯЄМО СТАРИЙ WEBHOOK (на всяк випадок)
-bot.remove_webhook()
-time.sleep(1)
+# ОЧИЩЕННЯ СЕСІЇ
+try:
+    bot.remove_webhook()
+    time.sleep(2)
+except:
+    pass
 
 SYMBOLS = ['SOL-USDT', 'XRP-USDT', 'DOGE-USDT', 'TON-USDT', 'ADA-USDT']
 
@@ -26,11 +28,11 @@ def get_data(symbol):
         if r.status_code == 200:
             d = r.json().get('data', [])
             if d:
-                return [float(x[4]) for x in d]  # close
-        print(f"BingX error {r.status_code} for {symbol}")
+                return [float(x[4]) for x in d]
+        print(f"[BingX] {r.status_code} для {symbol}")
         return None
     except Exception as e:
-        print(f"Request error: {e}")
+        print(f"[ERROR] {e}")
         return None
 
 def rsi(c):
@@ -53,14 +55,14 @@ def generate_signal():
     return "Сигналів немає"
 
 def monitor():
-    print("Моніторинг запущено — сигнали кожні 15 хв")
+    print(f"[{datetime.now().strftime('%H:%M')}] БОТ ЗАПУЩЕНО — СИГНАЛИ КОЖНІ 15 ХВ")
     while True:
         try:
             sig = generate_signal()
             bot.send_message(CHAT_ID, sig)
             print(f"Відправлено: {sig}")
         except Exception as e:
-            print(f"Помилка відправки: {e}")
+            print(f"Помилка: {e}")
         time.sleep(900)
 
 @bot.message_handler(commands=['signal'])
@@ -68,19 +70,6 @@ def signal(m):
     bot.reply_to(m, generate_signal())
 
 if __name__ == '__main__':
-    # Запускаємо моніторинг у фоні
     Thread(target=monitor, daemon=True).start()
-    
-    print("БОТ ЗАПУЩЕНО НА RENDER! Чекаю команди /signal...")
-    
-    # Polling з захистом від 409
-    while True:
-        try:
-            bot.polling(none_stop=True, interval=0, timeout=20)
-        except Exception as e:
-            if "409" in str(e):
-                print("409 Conflict — чекаю 10 сек...")
-                time.sleep(10)
-            else:
-                print(f"Polling error: {e}")
-                time.sleep(5)
+    print("Чекаю команди /signal...")
+    bot.polling(none_stop=True, interval=0, timeout=20)
