@@ -3,20 +3,17 @@ import requests
 import numpy as np
 import time
 import os
-from datetime import datetime
+from flask import Flask, request
 from threading import Thread
+from datetime import datetime
 
 # === ЗМІННІ ===
 TOKEN = '8317841952:AAH1dtIYJ0oh-dhpAVhudqCVZTRrBL6it1g'
 CHAT_ID = 7436397755
-bot = telebot.TeleBot(TOKEN)
+WEBHOOK_URL = os.getenv('RENDER_EXTERNAL_URL') + '/bot'  # Render дасть URL
 
-# === ОЧИЩЕННЯ WEBHOOK ===
-try:
-    bot.remove_webhook()
-    time.sleep(3)
-except:
-    pass
+bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
 
 # === ПАРИ (42 + FARTCOIN) ===
 SYMBOLS = [
@@ -39,7 +36,7 @@ def get_data(symbol):
         url = "https://open-api.bingx.com/openApi/swap/v2/quote/klines"
         r = requests.get(url, params={'symbol': symbol, 'interval': '15m', 'limit': 100}, timeout=10)
         time.sleep(0.7)
-        if r.status == 200:
+        if r.status_code == 200:
             data = r.json().get('data', [])
             if data:
                 return [float(c[4]) for c in data]
@@ -78,7 +75,7 @@ def generate_signal():
 
 # === МОНІТОРИНГ ===
 def monitor():
-    print(f"[{datetime.now().strftime('%H:%M')}] СКАНУВАННЯ КОЖНІ 15 ХВ")
+    print(f"[{datetime.now().strftime('%H:%M')}] WEBHOOK БОТ ЗАПУЩЕНО")
     while True:
         try:
             sig = generate_signal()
@@ -89,20 +86,38 @@ def monitor():
             print(f"Помилка: {e}")
         time.sleep(INTERVAL)
 
-# === КОМАНДИ ===
+# === WEBHOOK ===
+@app.route('/bot', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return '', 200
+    else:
+        return 'Invalid', 403
+
 @bot.message_handler(commands=['signal'])
 def cmd_signal(m):
     sig = generate_signal()
     bot.reply_to(m, sig or "Сигналів немає")
 
-# === ЗАПУСК З ПЕРЕЗАПУСКОМ ===
+# === ЗАПУСК ===
 if __name__ == '__main__':
+    # Очистити старий webhook
+    try:
+        bot.remove_webhook()
+        time.sleep(2)
+    except:
+        pass
+
+    # Встановити новий
+    bot.set_webhook(url=WEBHOOK_URL)
+    print(f"Webhook встановлено: {WEBHOOK_URL}")
+
+    # Запустити моніторинг
     Thread(target=monitor, daemon=True).start()
-    print("БОТ ЗАПУЩЕНО! Чекаю /signal...")
-    
-    while True:
-        try:
-            bot.polling(none_stop=True, interval=0, timeout=20)
-        except Exception as e:
-            print(f"Polling впав: {e}. Перезапуск...")
-            time.sleep(10)
+
+    # Запустити Flask
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
