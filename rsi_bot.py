@@ -63,16 +63,16 @@ def generate_signal():
         if c and len(c) > 14:
             r = rsi(c)
             price = c[-1]
-            if r < 35:
+            if r < 40:  # Знижено з 35
                 return f"BUY {sym}\nЦіна: {price:.4f}\nRSI: {r:.1f}"
-            if r > 65:
+            if r > 60:  # Знижено з 65
                 return f"SELL {sym}\nЦіна: {price:.4f}\nRSI: {r:.1f}"
     return None
 
 def monitor():
     global last_no_signal
     last_no_signal = time.time()
-    print(f"[{datetime.now().strftime('%H:%M')}] МОНІТОРИНГ ЗАПУЩЕНО — КОЖНІ 15 ХВ")
+    print(f"[{datetime.now().strftime('%H:%M')}] МОНІТОРИНГ ЗАПУЩЕНО")
     while True:
         try:
             now = time.time()
@@ -81,7 +81,7 @@ def monitor():
             if sig:
                 bot.send_message(CHAT_ID, sig)
                 print(f"Відправлено сигнал: {sig}")
-                last_no_signal = now  # скидаємо таймер
+                last_no_signal = now
             else:
                 # "Сигналів немає" — 1 раз на годину
                 if now - last_no_signal >= NO_SIGNAL_INTERVAL:
