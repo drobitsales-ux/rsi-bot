@@ -10,13 +10,13 @@ from threading import Thread
 # === НАЛАШТУВАННЯ ===
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = int(os.getenv('CHAT_ID'))
-BINGX_API_KEY = os.getenv('BINGX_API_KEY')  # ← ОБОВ'ЯЗКОВО!
+BINGX_API_KEY = os.getenv('BINGX_API_KEY')
 
 if not BINGX_API_KEY:
     print("[ПОМИЛКА] BINGX_API_KEY не знайдено в Render!")
     exit(1)
 
-WEBHOOK_URL = "https://rsi-bot-4vaj.onrender.com/bot"  # ← Зміни на свою назву!
+WEBHOOK_URL = "https://rsi-bot-4vaj.onrender.com/bot"  # ← Зміни на свою!
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -61,6 +61,13 @@ def get_data(symbol):
                 print(f"[EMPTY DATA] {symbol} → {json_data}")
         else:
             print(f"[ERROR] {symbol} → {r.status_code}: {r.text}")
+        
+        time.sleep(1.0)
+        return None
+    except Exception as e:
+        print(f"[EXCEPTION] {symbol} → {e}")
+        time.sleep(1.0)
+        return None
         
         # ЗАХИСТ ВІД БЛОКУВАННЯ
         time.sleep(1.0)  # 1 секунда між запитами
