@@ -95,19 +95,21 @@ def monitor():
         time.sleep(INTERVAL)
 
 # === WEBHOOK ===
+@app.route('/')
+def index():
+    print(f"[{datetime.now().strftime('%H:%M')}] Головна сторінка відкрита")
+    return "RSI Bot живий! Webhook: /bot"
+
 @app.route('/bot', methods=['POST'])
 def webhook():
+    print(f"[{datetime.now().strftime('%H:%M')}] Отримано update від Telegram")
     if request.headers.get('content-type') == 'application/json':
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
         bot.process_new_updates([update])
         return '', 200
     else:
-        return 'Invalid content type', 403
-
-@app.route('/')
-def index():
-    return "RSI Bot живий!"
+        return 'Invalid', 403
 
 # === КОМАНДИ ===
 @bot.message_handler(commands=['signal'])
