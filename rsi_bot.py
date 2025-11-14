@@ -10,13 +10,13 @@ from threading import Thread
 # === НАЛАШТУВАННЯ ===
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = int(os.getenv('CHAT_ID'))
-BINGX_API_KEY = os.getenv('BINGX_API_KEY')
+BINGX_API_KEY = os.getenv('BINGX_API_KEY')  # ← ОБОВ'ЯЗКОВО!
 
-if not TOKEN or not CHAT_ID or not BINGX_API_KEY:
-    print("[ПОМИЛКА] TELEGRAM_TOKEN, CHAT_ID або BINGX_API_KEY відсутні!")
+if not BINGX_API_KEY:
+    print("[ПОМИЛКА] BINGX_API_KEY не знайдено в Render!")
     exit(1)
 
-WEBHOOK_URL = "https://rsi-bot-4vaj.onrender.com/bot"  # ← ЗМІНИ НА СВОЮ НАЗВУ!
+WEBHOOK_URL = "https://rsi-bot-4vaj.onrender.com/bot"  # ← Зміни на свою назву!
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -40,7 +40,7 @@ last_no_signal = 0
 def get_data(symbol):
     url = "https://open-api.bingx.com/openApi/swap/v2/quote/klines"
     params = {'symbol': symbol, 'interval': '15m', 'limit': 100}
-    headers = {'X-BX-APIKEY': BINGX_API_KEY}
+    headers = {'X-BX-APIKEY': BINGX_API_KEY} if BINGX_API_KEY else {}
     
     try:
         print(f"[REQUEST] → {symbol}")
@@ -58,12 +58,16 @@ def get_data(symbol):
                 print(f"[DATA OK] {symbol} → {len(closes)} свічок | Ціна: {closes[-1]:.6f}")
                 return closes, highs, lows, volumes
             else:
-                print(f"[EMPTY] {symbol} → {json_data}")
+                print(f"[EMPTY DATA] {symbol} → {json_data}")
         else:
             print(f"[ERROR] {symbol} → {r.status_code}: {r.text}")
+        
+        # ЗАХИСТ ВІД БЛОКУВАННЯ
+        time.sleep(1.0)  # 1 секунда між запитами
         return None
     except Exception as e:
         print(f"[EXCEPTION] {symbol} → {e}")
+        time.sleep(1.0)
         return None
 
 # === ІНДИКАТОРИ ===
