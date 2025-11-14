@@ -16,7 +16,7 @@ WEBHOOK_URL = "https://rsi-bot-4vaj.onrender.com/bot"
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# === СПИСОК ПАР ===
+# === СПИСОК ПАР (KuCoin: з дефісом) ===
 SYMBOLS = [
     'FARTCOIN-USDT', 'SOL-USDT', 'XRP-USDT', 'DOGE-USDT', 'TON-USDT', 'ADA-USDT',
     'ORDI-USDT', 'AVAX-USDT', 'SHIB-USDT', 'LINK-USDT', 'DOT-USDT', 'BCH-USDT',
@@ -31,18 +31,17 @@ INTERVAL = 900
 NO_SIGNAL_INTERVAL = 3600
 last_no_signal = 0
 
-# === ДАНІ З BYBIT (З User-Agent) ===
+# === ДАНІ З KUCOIN ===
 def get_data(symbol):
-    url = "https://api.bybit.com/v5/market/kline"
+    url = "https://api.kucoin.com/api/v1/market/candles"
     params = {
-        'category': 'linear',
         'symbol': symbol,
-        'interval': '15',
-        'limit': 100
+        'type': '15min',
+        'startAt': int(time.time() - 100 * 900),
+        'endAt': int(time.time())
     }
     headers = {
-        'User-Agent': 'Mozilla/5.0 (RSI-Bot/1.0)',
-        'Referer': 'https://www.bybit.com'
+        'User-Agent': 'Mozilla/5.0 (RSI-Bot/1.0)'
     }
     
     try:
@@ -51,25 +50,23 @@ def get_data(symbol):
         print(f"[RESPONSE] {symbol} → {r.status_code}")
         
         if r.status_code == 200:
-            try:
-                json_data = r.json()
-                if json_data.get('retCode') == 0:
-                    data = json_data.get('result', {}).get('list', [])
-                    if data:
-                        data = data[::-1]
-                        closes = [float(x[4]) for x in data]
-                        highs = [float(x[2]) for x in data]
-                        lows = [float(x[3]) for x in data]
-                        volumes = [float(x[5]) for x in data]
-                        print(f"[DATA OK] {symbol} → {len(closes)} свічок | Ціна: {closes[-1]:.6f}")
-                        time.sleep(0.1)
-                        return closes, highs, lows, volumes
-                    else:
-                        print(f"[EMPTY DATA] {symbol}")
+            json_data = r.json()
+            if json_data.get('code') == '200000':
+                data = json_data.get('data', [])
+                if data:
+                    # KuCoin: зворотний порядок → перевертаємо
+                    data = data[::-1]
+                    closes = [float(x[2]) for x in data]
+                    highs = [float(x[3]) for x in data]
+                    lows = [float(x[4]) for x in data]
+                    volumes = [float(x[5]) for x in data]
+                    print(f"[DATA OK] {symbol} → {len(closes)} свічок | Ціна: {closes[-1]:.6f}")
+                    time.sleep(0.1)
+                    return closes, highs, lows, volumes
                 else:
-                    print(f"[BYBIT ERROR] {symbol} → {json_data}")
-            except Exception as e:
-                print(f"[JSON ERROR] {symbol} → {e}")
+                    print(f"[EMPTY DATA] {symbol}")
+            else:
+                print(f"[KUCOIN ERROR] {symbol} → {json_data}")
         else:
             print(f"[HTTP ERROR] {symbol} → {r.status_code}: {r.text[:200]}")
         
@@ -157,12 +154,12 @@ def monitor():
     last_no_signal = time.time()
     print(f"[{datetime.now().strftime('%H:%M')}] МОНІТОРИНГ ЗАПУЩЕНО")
     
-    print(f"[{datetime.now().strftime('%H:%M')}] ТЕСТ API BYBIT...")
+    print(f"[{datetime.now().strftime('%H:%M')}] ТЕСТ API KUCOIN...")
     test_data = get_data('FARTCOIN-USDT')
     if test_data:
         print(f"[TEST OK] Отримано {len(test_data[0])} свічок | Ціна: {test_data[0][-1]:.6f}")
     else:
-        print("[TEST FAILED] Немає даних з Bybit")
+        print("[TEST FAILED] Немає даних з KuCoin")
 
     print(f"[{datetime.now().strftime('%H:%M')}] ПЕРШИЙ СКАН...")
     sig = generate_signal()
