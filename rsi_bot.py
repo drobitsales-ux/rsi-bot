@@ -40,28 +40,34 @@ last_no_signal = 0
 def get_data(symbol):
     url = "https://open-api.bingx.com/openApi/swap/v2/quote/klines"
     params = {'symbol': symbol, 'interval': '15m', 'limit': 100}
-    headers = {'X-BX-APIKEY': BINGX_API_KEY} if BINGX_API_KEY else {}
+    headers = {
+        'X-BX-APIKEY': BINGX_API_KEY,
+        'User-Agent': 'RSI-Bot/1.0'  # ← ДОДАЄМО!
+    }
     
     try:
         print(f"[REQUEST] → {symbol}")
-        r = requests.get(url, params=params, headers=headers, timeout=15)
+        r = requests.get(url, params=params, headers=headers, timeout=10)
         print(f"[RESPONSE] {symbol} → {r.status_code}")
         
         if r.status_code == 200:
             json_data = r.json()
-            data = json_data.get('data', [])
-            if data:
-                closes = [float(x[4]) for x in data]
-                highs = [float(x[2]) for x in data]
-                lows = [float(x[3]) for x in data]
-                volumes = [float(x[5]) for x in data]
-                print(f"[DATA OK] {symbol} → {len(closes)} свічок | Ціна: {closes[-1]:.6f}")
-                time.sleep(1.0)
-                return closes, highs, lows, volumes
+            if json_data.get('code') == 0:
+                data = json_data.get('data', [])
+                if data:
+                    closes = [float(x[4]) for x in data]
+                    highs = [float(x[2]) for x in data]
+                    lows = [float(x[3]) for x in data]
+                    volumes = [float(x[5]) for x in data]
+                    print(f"[DATA OK] {symbol} → {len(closes)} свічок | Ціна: {closes[-1]:.6f}")
+                    time.sleep(1.0)
+                    return closes, highs, lows, volumes
+                else:
+                    print(f"[EMPTY DATA] {symbol} → {json_data}")
             else:
-                print(f"[EMPTY DATA] {symbol} → {json_data}")
+                print(f"[BINGX ERROR] {symbol} → {json_data}")
         else:
-            print(f"[ERROR] {symbol} → {r.status_code}: {r.text}")
+            print(f"[HTTP ERROR] {symbol} → {r.status_code}: {r.text}")
         
         time.sleep(1.0)
         return None
