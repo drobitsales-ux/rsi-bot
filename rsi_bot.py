@@ -39,7 +39,7 @@ def get_data(symbol):
             json_data = r.json()
             data = json_data.get('data', [])
             if data:
-                closes = [float(x[4]) for x in data]  # close price
+                closes = [float(x[4]) for x in data]  # close
                 print(f"[DATA OK] {symbol} → {len(closes)} свічок | Остання: {closes[-1]:.6f}")
                 return closes
             else:
@@ -64,9 +64,10 @@ def generate_signal():
     global last_no_signal
     for sym in SYMBOLS:
         c = get_data(sym)
-        if c and len(c) > 14:
+        if c and len(c) >= 15:
             r = rsi(c)
             price = c[-1]
+            print(f"[RSI] {sym} → {r:.1f} | Ціна: {price:.6f}")
             if r < 40:
                 msg = f"BUY {sym}\nЦіна: {price:.6f}\nRSI: {r:.1f}"
                 print(f"[SIGNAL] {msg}")
@@ -75,6 +76,7 @@ def generate_signal():
                 msg = f"SELL {sym}\nЦіна: {price:.6f}\nRSI: {r:.1f}"
                 print(f"[SIGNAL] {msg}")
                 return msg
+    print("[NO SIGNAL] Жоден актив не відповідає умовам")
     return None
 
 # === МОНІТОРИНГ ===
@@ -88,11 +90,12 @@ def monitor():
             if sig:
                 bot.send_message(CHAT_ID, sig)
                 last_no_signal = now
+                print(f"[{datetime.now().strftime('%H:%M')}] Сигнал відправлено!")
             else:
                 if now - last_no_signal >= NO_SIGNAL_INTERVAL:
                     bot.send_message(CHAT_ID, "Сигналів немає")
-                    print("Відправлено: Сигналів немає")
                     last_no_signal = now
+                    print(f"[{datetime.now().strftime('%H:%M')}] Відправлено: Сигналів немає")
         except Exception as e:
             print(f"[MONITOR ERROR] {e}")
         time.sleep(INTERVAL)
