@@ -10,77 +10,62 @@ from threading import Thread
 # === НАЛАШТУВАННЯ ===
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = int(os.getenv('CHAT_ID'))
-BINGX_API_KEY = os.getenv('BINGX_API_KEY')
-
-if not BINGX_API_KEY:
-    print("[ПОМИЛКА] BINGX_API_KEY не знайдено!")
-    exit(1)
 
 WEBHOOK_URL = "https://rsi-bot-4vaj.onrender.com/bot"  # ← Зміни на свій URL!
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# === СПИСОК ПАР (42 + FARTCOIN) ===
+# === СПИСОК ПАР (Binance: без дефісу) ===
 SYMBOLS = [
-    'FARTCOIN-USDT', 'SOL-USDT', 'XRP-USDT', 'DOGE-USDT', 'TON-USDT', 'ADA-USDT',
-    'ORDI-USDT', 'AVAX-USDT', 'SHIB-USDT', 'LINK-USDT', 'DOT-USDT', 'BCH-USDT',
-    'NEAR-USDT', 'MATIC-USDT', 'UNI-USDT', 'KAS-USDT', 'FET-USDT', 'ETC-USDT',
-    'XLM-USDT', 'APT-USDT', 'HBAR-USDT', 'SUI-USDT', 'FIL-USDT', 'MKR-USDT',
-    'ATOM-USDT', 'INJ-USDT', 'GRT-USDT', 'LDO-USDT', 'VET-USDT', 'OP-USDT',
-    'ARB-USDT', 'SEI-USDT', 'THETA-USDT', 'GT-USDT', 'RENDER-USDT', 'FLKI-USDT',
-    'PYTH-USDT', 'BONK-USDT', 'AAVE-USDT', 'JUP-USDT', 'ONDO-USDT', 'WIF-USDT'
+    'FARTCOINUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'TONUSDT', 'ADAUSDT',
+    'ORDIUSDT', 'AVAXUSDT', 'SHIBUSDT', 'LINKUSDT', 'DOTUSDT', 'BCHUSDT',
+    'NEARUSDT', 'MATICUSDT', 'UNIUSDT', 'KASUSDT', 'FETUSDT', 'ETCUSDT',
+    'XLMUSDT', 'APTUSDT', 'HBARUSDT', 'SUIUSDT', 'FILUSDT', 'MKRUSDT',
+    'ATOMUSDT', 'INJUSDT', 'GRTUSDT', 'LDOUSDT', 'VETUSDT', 'OPUSDT',
+    'ARBUSDT', 'SEIUSDT', 'THETAUSDT', 'GTUSDT', 'RENDERUSDT', 'FLKIUSDT',
+    'PYTHUSDT', 'BONKUSDT', 'AAVEUSDT', 'JUPUSDT', 'ONDOUSDT', 'WIFUSDT'
 ]
 
 INTERVAL = 900  # 15 хвилин
 NO_SIGNAL_INTERVAL = 3600  # 1 година
 last_no_signal = 0
 
-# === ДАНІ ===
+# === ДАНІ З BINANCE ===
 def get_data(symbol):
-    url = "https://open-api.bingx.com/openApi/swap/v2/quote/klines"
-    params = {'symbol': symbol, 'interval': '15m', 'limit': 100}
-    headers = {
-        'X-BX-APIKEY': BINGX_API_KEY,
-        'User-Agent': 'Mozilla/5.0 (RSI-Bot/1.0)'
+    binance_symbol = symbol  # Вже без дефісу
+    url = "https://api.binance.com/api/v3/klines"
+    params = {
+        'symbol': binance_symbol,
+        'interval': '15m',
+        'limit': 100
     }
     
     try:
-        print(f"[REQUEST] → {symbol} | URL: {url}")
-        r = requests.get(url, params=params, headers=headers, timeout=5)  # ← 5 сек
+        print(f"[REQUEST] → {symbol}")
+        r = requests.get(url, params=params, timeout=10)
         print(f"[RESPONSE] {symbol} → {r.status_code}")
         
         if r.status_code == 200:
-            try:
-                json_data = r.json()
-                if json_data.get('code') == 0:
-                    data = json_data.get('data', [])
-                    if data:
-                        closes = [float(x[4]) for x in data]
-                        highs = [float(x[2]) for x in data]
-                        lows = [float(x[3]) for x in data]
-                        volumes = [float(x[5]) for x in data]
-                        print(f"[DATA OK] {symbol} → {len(closes)} свічок | Ціна: {closes[-1]:.6f}")
-                        time.sleep(1.0)
-                        return closes, highs, lows, volumes
-                    else:
-                        print(f"[EMPTY DATA] {symbol} → {json_data}")
-                else:
-                    print(f"[BINGX ERROR] {symbol} → {json_data}")
-            except Exception as e:
-                print(f"[JSON ERROR] {symbol} → {e}")
+            data = r.json()
+            if data and len(data) > 0:
+                closes = [float(x[4]) for x in data]
+                highs = [float(x[2]) for x in data]
+                lows = [float(x[3]) for x in data]
+                volumes = [float(x[5]) for x in data]
+                print(f"[DATA OK] {symbol} → {len(closes)} свічок | Ціна: {closes[-1]:.6f}")
+                time.sleep(0.1)  # Binance: 1200 запитів/хв
+                return closes, highs, lows, volumes
+            else:
+                print(f"[EMPTY DATA] {symbol}")
         else:
             print(f"[HTTP ERROR] {symbol} → {r.status_code}: {r.text[:200]}")
         
-        time.sleep(1.0)
-        return None
-    except requests.exceptions.Timeout:
-        print(f"[TIMEOUT] {symbol} → запит не встиг за 5 сек")
-        time.sleep(1.0)
+        time.sleep(0.1)
         return None
     except Exception as e:
         print(f"[EXCEPTION] {symbol} → {e}")
-        time.sleep(1.0)
+        time.sleep(0.1)
         return None
 
 # === ІНДИКАТОРИ ===
@@ -141,15 +126,18 @@ def generate_signal():
 
         probability = max(0, (confirmations / 5) * 100)
 
+        # ВИДАЛЯЄМО "USDT"
+        coin = sym[:-4]
+
         if probability >= 60 and m > ms:
             tp = ub
             sl = lb * 0.98
-            return f"{sym.split('-')[0]} Long, {probability}%, RSI {r:.1f}\nТВХ {price:.4f}\nTP {tp:.4f}\nSL {sl:.4f}"
+            return f"{coin} Long, {probability}%, RSI {r:.1f}\nТВХ {price:.4f}\nTP {tp:.4f}\nSL {sl:.4f}"
         
         if probability >= 60 and m < ms:
             tp = lb
             sl = ub * 1.02
-            return f"{sym.split('-')[0]} Short, {probability}%, RSI {r:.1f}\nТВХ {price:.4f}\nTP {tp:.4f}\nSL {sl:.4f}"
+            return f"{coin} Short, {probability}%, RSI {r:.1f}\nТВХ {price:.4f}\nTP {tp:.4f}\nSL {sl:.4f}"
     
     return None
 
@@ -159,13 +147,13 @@ def monitor():
     last_no_signal = time.time()
     print(f"[{datetime.now().strftime('%H:%M')}] МОНІТОРИНГ ЗАПУЩЕНО")
     
-    # ТЕСТОВИЙ ЗАПИТ ДО BINGX
-    print(f"[{datetime.now().strftime('%H:%M')}] ТЕСТ API BINGX...")
-    test = get_data('FARTCOIN-USDT')
-    if test:
-        print(f"[TEST OK] Отримано {len(test[0])} свічок")
+    # ТЕСТ API BINANCE
+    print(f"[{datetime.now().strftime('%H:%M')}] ТЕСТ API BINANCE...")
+    test_data = get_data('FARTCOINUSDT')
+    if test_data:
+        print(f"[TEST OK] Отримано {len(test_data[0])} свічок | Ціна: {test_data[0][-1]:.6f}")
     else:
-        print("[TEST FAILED] Немає даних з BingX")
+        print("[TEST FAILED] Немає даних з Binance")
 
     # ПЕРШИЙ СКАН
     print(f"[{datetime.now().strftime('%H:%M')}] ПЕРШИЙ СКАН...")
