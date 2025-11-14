@@ -32,15 +32,18 @@ def get_data(symbol):
     
     try:
         print(f"[REQUEST] → {symbol}")
-        r = requests.get(url, params=params, headers=headers, timeout=10)
+        r = requests.get(url, params=params, headers=headers, timeout=15)
         print(f"[RESPONSE] {symbol} → {r.status_code}")
         
         if r.status_code == 200:
-            data = r.json().get('data', [])
+            json_data = r.json()
+            data = json_data.get('data', [])
             if data:
-                closes = [float(x[4]) for x in data]
-                print(f"[DATA] {symbol} → {len(closes)} свічок, остання: {closes[-1]:.6f}")
+                closes = [float(x[4]) for x in data]  # close price
+                print(f"[DATA OK] {symbol} → {len(closes)} свічок | Остання: {closes[-1]:.6f}")
                 return closes
+            else:
+                print(f"[EMPTY DATA] {symbol} → {json_data}")
         else:
             print(f"[ERROR] {symbol} → {r.status_code}: {r.text}")
         return None
