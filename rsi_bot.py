@@ -6,17 +6,25 @@ import os
 from datetime import datetime
 from flask import Flask, request
 from threading import Thread
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+# === СЕСІЯ З РЕТРАЄМ ===
+session = requests.Session()
+retry = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+adapter = HTTPAdapter(max_retries=retry)
+session.mount('http://', adapter)
+session.mount('https://', adapter)
 
 # === НАЛАШТУВАННЯ ===
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = int(os.getenv('CHAT_ID'))
-
 WEBHOOK_URL = "https://rsi-bot-4vaj.onrender.com/bot"
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# === СПИСОК ПАР (KuCoin: з дефісом) ===
+# === СПИСОК ПАР ===
 SYMBOLS = [
     'FARTCOIN-USDT', 'SOL-USDT', 'XRP-USDT', 'DOGE-USDT', 'TON-USDT', 'ADA-USDT',
     'ORDI-USDT', 'AVAX-USDT', 'SHIB-USDT', 'LINK-USDT', 'DOT-USDT', 'BCH-USDT',
@@ -41,40 +49,42 @@ def get_data(symbol):
         'endAt': int(time.time())
     }
     headers = {
-        'User-Agent': 'Mozilla/5.0 (RSI-Bot/1.0)'
+        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36'
     }
     
     try:
         print(f"[REQUEST] → {symbol}")
-        r = requests.get(url, params=params, headers=headers, timeout=10)
+        r = session.get(url, params=params, headers=headers, timeout=15)
         print(f"[RESPONSE] {symbol} → {r.status_code}")
         
         if r.status_code == 200:
-            json_data = r.json()
-            if json_data.get('code') == '200000':
-                data = json_data.get('data', [])
-                if data:
-                    # KuCoin: зворотний порядок → перевертаємо
-                    data = data[::-1]
-                    closes = [float(x[2]) for x in data]
-                    highs = [float(x[3]) for x in data]
-                    lows = [float(x[4]) for x in data]
-                    volumes = [float(x[5]) for x in data]
-                    print(f"[DATA OK] {symbol} → {len(closes)} свічок | Ціна: {closes[-1]:.6f}")
-                    time.sleep(0.1)
-                    return closes, highs, lows, volumes
+            try:
+                json_data = r.json()
+                if json_data.get('code') == '200000':
+                    data = json_data.get('data', [])
+                    if data:
+                        data = data[::-1]
+                        closes = [float(x[2]) for x in data]
+                        highs = [float(x[3]) for x in data]
+                        lows = [float(x[4]) for x in data]
+                        volumes = [float(x[5]) for x in data]
+                        print(f"[DATA OK] {symbol} → {len(closes)} свічок | Ціна: {closes[-1]:.6f}")
+                        return closes, highs, lows, volumes
+                    else:
+                        print(f"[EMPTY DATA] {symbol}")
                 else:
-                    print(f"[EMPTY DATA] {symbol}")
-            else:
-                print(f"[KUCOIN ERROR] {symbol} → {json_data}")
+                    print(f"[KUCOIN ERROR] {symbol} → {json_data}")
+            except Exception as e:
+                print(f"[JSON ERROR] {symbol} → {e}")
         else:
             print(f"[HTTP ERROR] {symbol} → {r.status_code}: {r.text[:200]}")
         
-        time.sleep(0.1)
         return None
-    except Exception as e:
-        print(f"[EXCEPTION] {symbol} → {e}")
-        time.sleep(0.1)
+    except requests.exceptions.Timeout:
+        print(f"[TIMEOUT] {symbol} → запит не встиг")
+        return None
+    except requests.exceptions.RequestException as e:
+        print(f"[REQ ERROR] {symbol} → {e}")
         return None
 
 # === ІНДИКАТОРИ ===
