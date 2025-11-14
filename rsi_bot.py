@@ -4,25 +4,31 @@ import numpy as np
 import time
 import os
 from datetime import datetime
+from flask import Flask, request
 from threading import Thread
 
-# Змінні
+# === НАЛАШТУВАННЯ ===
 TOKEN = '8317841952:AAH1dtIYJ0oh-dhpAVhudqCVZTRrBL6it1g'
 CHAT_ID = 7436397755
-API_KEY = os.getenv('BINGX_API_KEY')
+BINGX_API_KEY = os.getenv('BINGX_API_KEY')  # ДОДАЙ В RENDER!
+
+WEBHOOK_URL = f"https://rsi-bot-4vaj.onrender.com/bot"  # ЗМІНЮЙ ПРИ РЕДЕПЛОЇ
 
 bot = telebot.TeleBot(TOKEN)
+app = Flask(__name__)
 
-SYMBOLS = ['FARTCOIN-USDT', 'SOL-USDT', 'DOGE-USDT', 'BONK-USDT'] 
+# === СПИСОК ПАР ===
+SYMBOLS = ['FARTCOIN-USDT', 'SOL-USDT', 'DOGE-USDT', 'BONK-USDT']
 
-INTERVAL = 900
-NO_SIGNAL_INTERVAL = 3600
-last_no_signal = 0
+INTERVAL = 900  # 15 хв
+NO_SIGNAL_INTERVAL = 3600  # 1 година
+last_no_signal = time.time()
 
+# === ОТРИМАННЯ ДАНИХ ===
 def get_data(symbol):
     url = "https://open-api.bingx.com/openApi/swap/v2/quote/klines"
     params = {'symbol': symbol, 'interval': '15m', 'limit': 100}
-    headers = {'X-BX-APIKEY': API_KEY} if API_KEY else {}
+    headers = {'X-BX-APIKEY': BINGX_API_KEY} if BINGX_API_KEY else {}
     
     try:
         print(f"[REQUEST] → {symbol}")
@@ -35,8 +41,6 @@ def get_data(symbol):
                 closes = [float(x[4]) for x in data]
                 print(f"[DATA] {symbol} → {len(closes)} свічок, остання: {closes[-1]:.6f}")
                 return closes
-            else:
-                print(f"[EMPTY] {symbol} → немає даних у JSON")
         else:
             print(f"[ERROR] {symbol} → {r.status_code}: {r.text}")
         return None
@@ -44,6 +48,7 @@ def get_data(symbol):
         print(f"[EXCEPTION] {symbol} → {e}")
         return None
 
+# === ІНДИКАТОРИ ===
 def rsi(c):
     if len(c) < 15: return 50
     d = np.diff(c)[-14:]
@@ -51,6 +56,7 @@ def rsi(c):
     l = np.mean(-d[d < 0]) if len(d[d < 0]) else 1
     return 100 - 100/(1 + g/l)
 
+# === СИГНАЛ ===
 def generate_signal():
     global last_no_signal
     for sym in SYMBOLS:
@@ -68,9 +74,9 @@ def generate_signal():
                 return msg
     return None
 
+# === МОНІТОРИНГ ===
 def monitor():
     global last_no_signal
-    last_no_signal = time.time()
     print(f"[{datetime.now().strftime('%H:%M')}] МОНІТОРИНГ ЗАПУЩЕНО")
     while True:
         try:
@@ -88,17 +94,47 @@ def monitor():
             print(f"[MONITOR ERROR] {e}")
         time.sleep(INTERVAL)
 
+# === WEBHOOK ===
+@app.route('/bot', methods=['POST'])
+def webhook():
+    if request.headers.get('content-type') == 'application/json':
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        return '', 200
+    else:
+        return 'Invalid content type', 403
+
+@app.route('/')
+def index():
+    return "RSI Bot живий!"
+
+# === КОМАНДИ ===
 @bot.message_handler(commands=['signal'])
 def cmd_signal(m):
     sig = generate_signal()
     bot.reply_to(m, sig or "Сигналів немає")
 
+# === ЗАПУСК ===
 if __name__ == '__main__':
+    # Видаляємо старий webhook
+    try:
+        bot.remove_webhook()
+        time.sleep(2)
+        print("Старий webhook видалено")
+    except:
+        pass
+
+    # Встановлюємо новий
+    try:
+        bot.set_webhook(url=WEBHOOK_URL)
+        print(f"Webhook встановлено: {WEBHOOK_URL}")
+    except Exception as e:
+        print(f"ПОМИЛКА webhook: {e}")
+
+    # Запускаємо моніторинг
     Thread(target=monitor, daemon=True).start()
-    print("БОТ ЗАПУЩЕНО")
-    while True:
-        try:
-            bot.polling(none_stop=True, interval=0, timeout=20)
-        except Exception as e:
-            print(f"[POLLING ERROR] {e}")
-            time.sleep(5)
+
+    # Запускаємо Flask
+    print("Flask сервер запущено")
+    app.run(host='0.0.0.0', port=10000)
