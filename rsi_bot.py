@@ -16,7 +16,7 @@ if not BINGX_API_KEY:
     print("[ПОМИЛКА] BINGX_API_KEY не знайдено!")
     exit(1)
 
-WEBHOOK_URL = "https://rsi-bot-4vaj.onrender.com/bot"  # ← Заміни на свій URL сервісу!
+WEBHOOK_URL = "https://rsi-bot-4vaj.onrender.com/bot"  # ← Зміни на свій URL!
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
@@ -33,8 +33,8 @@ SYMBOLS = [
 ]
 
 INTERVAL = 900  # 15 хвилин
-NO_SIGNAL_INTERVAL = 3600  # 1 година для "Сигналів немає"
-last_no_signal = 0  # Глобальна змінна
+NO_SIGNAL_INTERVAL = 3600  # 1 година
+last_no_signal = 0
 
 # === ДАНІ ===
 def get_data(symbol):
@@ -56,13 +56,14 @@ def get_data(symbol):
                 lows = [float(x[3]) for x in data]
                 volumes = [float(x[5]) for x in data]
                 print(f"[DATA OK] {symbol} → {len(closes)} свічок | Ціна: {closes[-1]:.6f}")
+                time.sleep(1.0)
                 return closes, highs, lows, volumes
             else:
                 print(f"[EMPTY DATA] {symbol} → {json_data}")
         else:
             print(f"[ERROR] {symbol} → {r.status_code}: {r.text}")
         
-        time.sleep(1.0)  # Захист від блокування
+        time.sleep(1.0)
         return None
     except Exception as e:
         print(f"[EXCEPTION] {symbol} → {e}")
@@ -110,32 +111,31 @@ def generate_signal():
         if not data: continue
         c, h, l, v = data
         price = c[-1]
-        r = rsi(c)  # Для інформації
+        r = rsi(c)
         m, ms = macd(c)
         _, ub, lb = bb(c)
         sk, _ = stoch(c)
         vs = vol_spike(v)
         vw = vwap(h, l, c, v)
 
-        # Підрахунок підтверджень (5 індикаторів, без RSI)
         confirmations = 0
-        if m > ms: confirmations += 1 # MACD (для BUY)
-        if m < ms: confirmations += 1 # MACD (для SELL)
-        if price <= lb or price >= ub: confirmations += 1 # BB
-        if sk < 35 or sk > 65: confirmations += 1 # Stoch
-        if vs > 1.0: confirmations += 1 # Volume
-        if price <= vw or price >= vw: confirmations += 1 # VWAP (для BUY/SELL)
+        if m > ms: confirmations += 1
+        if m < ms: confirmations += 1
+        if price <= lb or price >= ub: confirmations += 1
+        if sk < 35 or sk > 65: confirmations += 1
+        if vs > 1.0: confirmations += 1
+        if price <= vw or price >= vw: confirmations += 1
 
-        probability = max(0, (confirmations / 5) * 100)  # %
+        probability = max(0, (confirmations / 5) * 100)
 
-        if probability >= 60 and m > ms: # Long
-            tp = ub # TP = upper BB
-            sl = lb * 0.98 # SL = lower BB - 2%
+        if probability >= 60 and m > ms:
+            tp = ub
+            sl = lb * 0.98
             return f"{sym.split('-')[0]} Long, {probability}%, RSI {r:.1f}\nТВХ {price:.4f}\nTP {tp:.4f}\nSL {sl:.4f}"
         
-        if probability >= 60 and m < ms: # Short
-            tp = lb # TP = lower BB
-            sl = ub * 1.02 # SL = upper BB + 2%
+        if probability >= 60 and m < ms:
+            tp = lb
+            sl = ub * 1.02
             return f"{sym.split('-')[0]} Short, {probability}%, RSI {r:.1f}\nТВХ {price:.4f}\nTP {tp:.4f}\nSL {sl:.4f}"
     
     return None
@@ -145,6 +145,17 @@ def monitor():
     global last_no_signal
     last_no_signal = time.time()
     print(f"[{datetime.now().strftime('%H:%M')}] МОНІТОРИНГ ЗАПУЩЕНО")
+    
+    # ПЕРШИЙ СКАН — МИТТЄВО
+    print(f"[{datetime.now().strftime('%H:%M')}] ПЕРШИЙ СКАН...")
+    sig = generate_signal()
+    if sig:
+        bot.send_message(CHAT_ID, sig)
+        print(f"Відправлено: {sig}")
+    else:
+        print("Сигналів немає на старті")
+
+    # ОСНОВНИЙ ЦИКЛ
     while True:
         try:
             now = time.time()
@@ -162,13 +173,31 @@ def monitor():
             print(f"[MONITOR ERROR] {e}")
         time.sleep(INTERVAL)
 
+# === WEBHOOK ===
+@app.route('/bot', methods=['POST'])
+def webhook():
+    try:
+        json_string = request.get_data().decode('utf-8')
+        update = telebot.types.Update.de_json(json_string)
+        bot.process_new_updates([update])
+        print(f"[WEBHOOK] Отримано update")
+        return '', 200
+    except Exception as e:
+        print(f"[WEBHOOK ERROR] {e}")
+        return 'Error', 500
+
+@app.route('/')
+def index():
+    return "RSI Bot живий! Webhook: /bot"
+
+# === КОМАНДИ ===
 @bot.message_handler(commands=['signal'])
 def cmd_signal(m):
     sig = generate_signal()
     bot.reply_to(m, sig or "Сигналів немає")
 
+# === ЗАПУСК ===
 if __name__ == '__main__':
-    # Очистити старий webhook
     try:
         bot.remove_webhook()
         time.sleep(2)
@@ -176,7 +205,6 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"Помилка видалення webhook: {e}")
 
-    # Встановити новий
     try:
         success = bot.set_webhook(url=WEBHOOK_URL)
         if success:
@@ -186,10 +214,8 @@ if __name__ == '__main__':
     except Exception as e:
         print(f"ПОМИЛКА webhook: {e}")
 
-    # Запустити моніторинг
     Thread(target=monitor, daemon=True).start()
     print("Моніторинг запущено")
 
-    # Запустити Flask
     print("Flask сервер запущено")
     app.run(host='0.0.0.0', port=10000, debug=False)
