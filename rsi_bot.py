@@ -9,17 +9,11 @@ from threading import Thread
 # Змінні
 TOKEN = '8317841952:AAH1dtIYJ0oh-dhpAVhudqCVZTRrBL6it1g'
 CHAT_ID = 7436397755
+API_KEY = os.getenv('BINGX_API_KEY')
+
 bot = telebot.TeleBot(TOKEN)
 
-SYMBOLS = [
-    'FARTCOIN-USDT', 'SOL-USDT', 'XRP-USDT', 'DOGE-USDT', 'TON-USDT', 'ADA-USDT',
-    'ORDI-USDT', 'AVAX-USDT', 'SHIB-USDT', 'LINK-USDT', 'DOT-USDT', 'BCH-USDT',
-    'NEAR-USDT', 'MATIC-USDT', 'UNI-USDT', 'KAS-USDT', 'FET-USDT', 'ETC-USDT',
-    'XLM-USDT', 'APT-USDT', 'HBAR-USDT', 'SUI-USDT', 'FIL-USDT', 'MKR-USDT',
-    'ATOM-USDT', 'INJ-USDT', 'GRT-USDT', 'LDO-USDT', 'VET-USDT', 'OP-USDT',
-    'ARB-USDT', 'SEI-USDT', 'THETA-USDT', 'GT-USDT', 'RENDER-USDT', 'FLKI-USDT',
-    'PYTH-USDT', 'BONK-USDT', 'AAVE-USDT', 'JUP-USDT', 'ONDO-USDT', 'WIF-USDT'
-]
+SYMBOLS = ['FARTCOIN-USDT', 'SOL-USDT', 'DOGE-USDT', 'BONK-USDT'] 
 
 INTERVAL = 900
 NO_SIGNAL_INTERVAL = 3600
@@ -28,18 +22,21 @@ last_no_signal = 0
 def get_data(symbol):
     url = "https://open-api.bingx.com/openApi/swap/v2/quote/klines"
     params = {'symbol': symbol, 'interval': '15m', 'limit': 100}
+    headers = {'X-BX-APIKEY': API_KEY} if API_KEY else {}
+    
     try:
-        r = requests.get(url, params=params, timeout=10)
-        print(f"[DEBUG] {symbol} → {r.status_code}")  # ЛОГУЄМО КОД!
-        time.sleep(0.7)
+        print(f"[REQUEST] → {symbol}")
+        r = requests.get(url, params=params, headers=headers, timeout=10)
+        print(f"[RESPONSE] {symbol} → {r.status_code}")
+        
         if r.status_code == 200:
             data = r.json().get('data', [])
             if data:
                 closes = [float(x[4]) for x in data]
-                print(f"[OK] {symbol} → {len(closes)} свічок, остання: {closes[-1]:.4f}")
+                print(f"[DATA] {symbol} → {len(closes)} свічок, остання: {closes[-1]:.6f}")
                 return closes
             else:
-                print(f"[EMPTY] {symbol} → немає даних")
+                print(f"[EMPTY] {symbol} → немає даних у JSON")
         else:
             print(f"[ERROR] {symbol} → {r.status_code}: {r.text}")
         return None
@@ -62,11 +59,11 @@ def generate_signal():
             r = rsi(c)
             price = c[-1]
             if r < 40:
-                msg = f"BUY {sym}\nЦіна: {price:.4f}\nRSI: {r:.1f}"
+                msg = f"BUY {sym}\nЦіна: {price:.6f}\nRSI: {r:.1f}"
                 print(f"[SIGNAL] {msg}")
                 return msg
             if r > 60:
-                msg = f"SELL {sym}\nЦіна: {price:.4f}\nRSI: {r:.1f}"
+                msg = f"SELL {sym}\nЦіна: {price:.6f}\nRSI: {r:.1f}"
                 print(f"[SIGNAL] {msg}")
                 return msg
     return None
