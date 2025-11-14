@@ -8,13 +8,17 @@ from flask import Flask, request
 from threading import Thread
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from concurrent.futures import ThreadPoolExecutor
 
-# === СЕСІЯ З РЕТРАЄМ ===
+# === СЕСІЯ + РЕТРАЙ ===
 session = requests.Session()
 retry = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
 adapter = HTTPAdapter(max_retries=retry)
 session.mount('http://', adapter)
 session.mount('https://', adapter)
+
+# === ТРЕДИНГ ПУЛ З ТАЙМАУТОМ ===
+executor = ThreadPoolExecutor(max_workers=1)
 
 # === НАЛАШТУВАННЯ ===
 TOKEN = os.getenv('TELEGRAM_TOKEN')
@@ -39,8 +43,8 @@ INTERVAL = 900
 NO_SIGNAL_INTERVAL = 3600
 last_no_signal = 0
 
-# === ДАНІ З KUCOIN ===
-def get_data(symbol):
+# === ДАНІ З KUCOIN (З ТАЙМАУТОМ) ===
+def _fetch_kucoin(symbol):
     url = "https://api.kucoin.com/api/v1/market/candles"
     params = {
         'symbol': symbol,
@@ -54,37 +58,37 @@ def get_data(symbol):
     
     try:
         print(f"[REQUEST] → {symbol}")
-        r = session.get(url, params=params, headers=headers, timeout=15)
+        r = session.get(url, params=params, headers=headers, timeout=10)
         print(f"[RESPONSE] {symbol} → {r.status_code}")
         
         if r.status_code == 200:
-            try:
-                json_data = r.json()
-                if json_data.get('code') == '200000':
-                    data = json_data.get('data', [])
-                    if data:
-                        data = data[::-1]
-                        closes = [float(x[2]) for x in data]
-                        highs = [float(x[3]) for x in data]
-                        lows = [float(x[4]) for x in data]
-                        volumes = [float(x[5]) for x in data]
-                        print(f"[DATA OK] {symbol} → {len(closes)} свічок | Ціна: {closes[-1]:.6f}")
-                        return closes, highs, lows, volumes
-                    else:
-                        print(f"[EMPTY DATA] {symbol}")
+            json_data = r.json()
+            if json_data.get('code') == '200000':
+                data = json_data.get('data', [])
+                if data:
+                    data = data[::-1]
+                    closes = [float(x[2]) for x in data]
+                    highs = [float(x[3]) for x in data]
+                    lows = [float(x[4]) for x in data]
+                    volumes = [float(x[5]) for x in data]
+                    print(f"[DATA OK] {symbol} → {len(closes)} свічок | Ціна: {closes[-1]:.6f}")
+                    return closes, highs, lows, volumes
                 else:
-                    print(f"[KUCOIN ERROR] {symbol} → {json_data}")
-            except Exception as e:
-                print(f"[JSON ERROR] {symbol} → {e}")
+                    print(f"[EMPTY DATA] {symbol}")
+            else:
+                print(f"[KUCOIN ERROR] {symbol} → {json_data}")
         else:
             print(f"[HTTP ERROR] {symbol} → {r.status_code}: {r.text[:200]}")
-        
-        return None
-    except requests.exceptions.Timeout:
-        print(f"[TIMEOUT] {symbol} → запит не встиг")
-        return None
-    except requests.exceptions.RequestException as e:
-        print(f"[REQ ERROR] {symbol} → {e}")
+    except Exception as e:
+        print(f"[EXCEPTION] {symbol} → {e}")
+    return None
+
+def get_data(symbol):
+    try:
+        future = executor.submit(_fetch_kucoin, symbol)
+        return future.result(timeout=15)
+    except Exception as e:
+        print(f"[TIMEOUT/ERROR] {symbol} → {e}")
         return None
 
 # === ІНДИКАТОРИ ===
