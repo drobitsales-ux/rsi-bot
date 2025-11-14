@@ -8,8 +8,8 @@ from flask import Flask, request
 from threading import Thread
 
 # === НАЛАШТУВАННЯ ===
-TOKEN = '8317841952:AAH1dtIYJ0oh-dhpAVhudqCVZTRrBL6it1g'
-CHAT_ID = 7436397755
+TOKEN = os.getenv('TELEGRAM_TOKEN')
+CHAT_ID = int(os.getenv('CHAT_ID'))
 BINGX_API_KEY = os.getenv('BINGX_API_KEY')  # ДОДАЙ В RENDER!
 
 WEBHOOK_URL = f"https://rsi-bot-4vaj.onrender.com/bot"  # ЗМІНЮЙ ПРИ РЕДЕПЛОЇ
