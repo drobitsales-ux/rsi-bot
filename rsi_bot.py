@@ -159,7 +159,15 @@ def monitor():
     last_no_signal = time.time()
     print(f"[{datetime.now().strftime('%H:%M')}] МОНІТОРИНГ ЗАПУЩЕНО")
     
-    # ПЕРШИЙ СКАН — МИТТЄВО
+    # ТЕСТОВИЙ ЗАПИТ ДО BINGX
+    print(f"[{datetime.now().strftime('%H:%M')}] ТЕСТ API BINGX...")
+    test = get_data('FARTCOIN-USDT')
+    if test:
+        print(f"[TEST OK] Отримано {len(test[0])} свічок")
+    else:
+        print("[TEST FAILED] Немає даних з BingX")
+
+    # ПЕРШИЙ СКАН
     print(f"[{datetime.now().strftime('%H:%M')}] ПЕРШИЙ СКАН...")
     sig = generate_signal()
     if sig:
