@@ -119,7 +119,6 @@ def cmd_signal(m):
 
 # === ЗАПУСК ===
 if __name__ == '__main__':
-    # Видаляємо старий webhook
     try:
         bot.remove_webhook()
         time.sleep(2)
@@ -127,16 +126,13 @@ if __name__ == '__main__':
     except:
         pass
 
-    # Встановлюємо новий
     try:
         bot.set_webhook(url=WEBHOOK_URL)
         print(f"Webhook встановлено: {WEBHOOK_URL}")
     except Exception as e:
         print(f"ПОМИЛКА webhook: {e}")
 
-    # Запускаємо моніторинг
     Thread(target=monitor, daemon=True).start()
+    print("Моніторинг запущено")
 
-    # Запускаємо Flask
-    print("Flask сервер запущено")
     app.run(host='0.0.0.0', port=10000)
