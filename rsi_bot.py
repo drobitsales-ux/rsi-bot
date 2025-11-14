@@ -16,28 +16,28 @@ WEBHOOK_URL = "https://rsi-bot-4vaj.onrender.com/bot"  # ← Зміни на с�
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
 
-# === СПИСОК ПАР (Binance: без дефісу) ===
+# === СПИСОК ПАР (Bybit: з дефісом) ===
 SYMBOLS = [
-    'FARTCOINUSDT', 'SOLUSDT', 'XRPUSDT', 'DOGEUSDT', 'TONUSDT', 'ADAUSDT',
-    'ORDIUSDT', 'AVAXUSDT', 'SHIBUSDT', 'LINKUSDT', 'DOTUSDT', 'BCHUSDT',
-    'NEARUSDT', 'MATICUSDT', 'UNIUSDT', 'KASUSDT', 'FETUSDT', 'ETCUSDT',
-    'XLMUSDT', 'APTUSDT', 'HBARUSDT', 'SUIUSDT', 'FILUSDT', 'MKRUSDT',
-    'ATOMUSDT', 'INJUSDT', 'GRTUSDT', 'LDOUSDT', 'VETUSDT', 'OPUSDT',
-    'ARBUSDT', 'SEIUSDT', 'THETAUSDT', 'GTUSDT', 'RENDERUSDT', 'FLKIUSDT',
-    'PYTHUSDT', 'BONKUSDT', 'AAVEUSDT', 'JUPUSDT', 'ONDOUSDT', 'WIFUSDT'
+    'FARTCOIN-USDT', 'SOL-USDT', 'XRP-USDT', 'DOGE-USDT', 'TON-USDT', 'ADA-USDT',
+    'ORDI-USDT', 'AVAX-USDT', 'SHIB-USDT', 'LINK-USDT', 'DOT-USDT', 'BCH-USDT',
+    'NEAR-USDT', 'MATIC-USDT', 'UNI-USDT', 'KAS-USDT', 'FET-USDT', 'ETC-USDT',
+    'XLM-USDT', 'APT-USDT', 'HBAR-USDT', 'SUI-USDT', 'FIL-USDT', 'MKR-USDT',
+    'ATOM-USDT', 'INJ-USDT', 'GRT-USDT', 'LDO-USDT', 'VET-USDT', 'OP-USDT',
+    'ARB-USDT', 'SEI-USDT', 'THETA-USDT', 'GT-USDT', 'RENDER-USDT', 'FLKI-USDT',
+    'PYTH-USDT', 'BONK-USDT', 'AAVE-USDT', 'JUP-USDT', 'ONDO-USDT', 'WIF-USDT'
 ]
 
 INTERVAL = 900  # 15 хвилин
 NO_SIGNAL_INTERVAL = 3600  # 1 година
 last_no_signal = 0
 
-# === ДАНІ З BINANCE ===
+# === ДАНІ З BYBIT ===
 def get_data(symbol):
-    binance_symbol = symbol  # Вже без дефісу
-    url = "https://api.binance.com/api/v3/klines"
+    url = "https://api.bybit.com/v5/market/kline"
     params = {
-        'symbol': binance_symbol,
-        'interval': '15m',
+        'category': 'linear',
+        'symbol': symbol,
+        'interval': '15',
         'limit': 100
     }
     
@@ -47,17 +47,23 @@ def get_data(symbol):
         print(f"[RESPONSE] {symbol} → {r.status_code}")
         
         if r.status_code == 200:
-            data = r.json()
-            if data and len(data) > 0:
-                closes = [float(x[4]) for x in data]
-                highs = [float(x[2]) for x in data]
-                lows = [float(x[3]) for x in data]
-                volumes = [float(x[5]) for x in data]
-                print(f"[DATA OK] {symbol} → {len(closes)} свічок | Ціна: {closes[-1]:.6f}")
-                time.sleep(0.1)  # Binance: 1200 запитів/хв
-                return closes, highs, lows, volumes
+            json_data = r.json()
+            if json_data.get('retCode') == 0:
+                data = json_data.get('result', {}).get('list', [])
+                if data:
+                    # Bybit повертає в зворотному порядку
+                    data = data[::-1]
+                    closes = [float(x[4]) for x in data]
+                    highs = [float(x[2]) for x in data]
+                    lows = [float(x[3]) for x in data]
+                    volumes = [float(x[5]) for x in data]
+                    print(f"[DATA OK] {symbol} → {len(closes)} свічок | Ціна: {closes[-1]:.6f}")
+                    time.sleep(0.1)
+                    return closes, highs, lows, volumes
+                else:
+                    print(f"[EMPTY DATA] {symbol}")
             else:
-                print(f"[EMPTY DATA] {symbol}")
+                print(f"[BYBIT ERROR] {symbol} → {json_data}")
         else:
             print(f"[HTTP ERROR] {symbol} → {r.status_code}: {r.text[:200]}")
         
@@ -126,8 +132,7 @@ def generate_signal():
 
         probability = max(0, (confirmations / 5) * 100)
 
-        # ВИДАЛЯЄМО "USDT"
-        coin = sym[:-4]
+        coin = sym.split('-')[0]
 
         if probability >= 60 and m > ms:
             tp = ub
@@ -147,13 +152,13 @@ def monitor():
     last_no_signal = time.time()
     print(f"[{datetime.now().strftime('%H:%M')}] МОНІТОРИНГ ЗАПУЩЕНО")
     
-    # ТЕСТ API BINANCE
-    print(f"[{datetime.now().strftime('%H:%M')}] ТЕСТ API BINANCE...")
-    test_data = get_data('FARTCOINUSDT')
+    # ТЕСТ API BYBIT
+    print(f"[{datetime.now().strftime('%H:%M')}] ТЕСТ API BYBIT...")
+    test_data = get_data('FARTCOIN-USDT')
     if test_data:
         print(f"[TEST OK] Отримано {len(test_data[0])} свічок | Ціна: {test_data[0][-1]:.6f}")
     else:
-        print("[TEST FAILED] Немає даних з Binance")
+        print("[TEST FAILED] Немає даних з Bybit")
 
     # ПЕРШИЙ СКАН
     print(f"[{datetime.now().strftime('%H:%M')}] ПЕРШИЙ СКАН...")
