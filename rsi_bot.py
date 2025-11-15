@@ -3,30 +3,28 @@ import requests
 import numpy as np
 import time
 import os
-from datetime import datetime
+import logging
+from datetime import datetime, timezone, timedelta
 from flask import Flask, request
 from threading import Thread
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
-from concurrent.futures import ThreadPoolExecutor
 
-# === СЕСІЯ + РЕТРАЙ ===
-session = requests.Session()
-retry = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
-adapter = HTTPAdapter(max_retries=retry)
-session.mount('http://', adapter)
-session.mount('https://', adapter)
-
-# === ТРЕДИНГ ПУЛ З ТАЙМАУТОМ ===
-executor = ThreadPoolExecutor(max_workers=1)
+# === ЛОГУВАННЯ (тепер все видно в Render Logs) ===
+logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
+log = logging.getLogger(__name__)
 
 # === НАЛАШТУВАННЯ ===
 TOKEN = os.getenv('TELEGRAM_TOKEN')
 CHAT_ID = int(os.getenv('CHAT_ID'))
-WEBHOOK_URL = "https://rsi-bot-4vaj.onrender.com/bot"
+
+WEBHOOK_URL = "https://rsi-bot-4vaj.onrender.com/bot"  # ← Зміни на свій URL!
 
 bot = telebot.TeleBot(TOKEN)
 app = Flask(__name__)
+
+# === ЧАС КИЄВА (UTC+2) ===
+KYIV_TZ = timezone(timedelta(hours=2))
 
 # === СПИСОК ПАР ===
 SYMBOLS = [
@@ -39,12 +37,18 @@ SYMBOLS = [
     'PYTH-USDT', 'BONK-USDT', 'AAVE-USDT', 'JUP-USDT', 'ONDO-USDT', 'WIF-USDT'
 ]
 
-INTERVAL = 900
-NO_SIGNAL_INTERVAL = 3600
+INTERVAL = 900  # 15 хвилин
+NO_SIGNAL_INTERVAL = 3600  # 1 година
 last_no_signal = 0
 
-# === ДАНІ З KUCOIN (З ТАЙМАУТОМ) ===
-def _fetch_kucoin(symbol):
+# === ДАНІ З KUCOIN (з таймаутом + логуванням) ===
+session = requests.Session()
+retry = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
+adapter = HTTPAdapter(max_retries=retry)
+session.mount('http://', adapter)
+session.mount('https://', adapter)
+
+def get_data(symbol):
     url = "https://api.kucoin.com/api/v1/market/candles"
     params = {
         'symbol': symbol,
@@ -53,13 +57,13 @@ def _fetch_kucoin(symbol):
         'endAt': int(time.time())
     }
     headers = {
-        'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36'
+        'User-Agent': 'Mozilla/5.0 (RSI-Bot/1.0)'
     }
     
     try:
-        print(f"[REQUEST] → {symbol}")
+        log.info(f"[REQUEST] → {symbol}")
         r = session.get(url, params=params, headers=headers, timeout=10)
-        print(f"[RESPONSE] {symbol} → {r.status_code}")
+        log.info(f"[RESPONSE] {symbol} → {r.status_code}")
         
         if r.status_code == 200:
             json_data = r.json()
@@ -71,24 +75,20 @@ def _fetch_kucoin(symbol):
                     highs = [float(x[3]) for x in data]
                     lows = [float(x[4]) for x in data]
                     volumes = [float(x[5]) for x in data]
-                    print(f"[DATA OK] {symbol} → {len(closes)} свічок | Ціна: {closes[-1]:.6f}")
+                    log.info(f"[DATA OK] {symbol} → {len(closes)} свічок | Ціна: {closes[-1]:.6f}")
                     return closes, highs, lows, volumes
                 else:
-                    print(f"[EMPTY DATA] {symbol}")
+                    log.info(f"[EMPTY DATA] {symbol}")
             else:
-                print(f"[KUCOIN ERROR] {symbol} → {json_data}")
+                log.info(f"[KUCOIN ERROR] {symbol} → {json_data}")
         else:
-            print(f"[HTTP ERROR] {symbol} → {r.status_code}: {r.text[:200]}")
+            log.info(f"[HTTP ERROR] {symbol} → {r.status_code}: {r.text[:200]}")
+        
+        time.sleep(0.1)
+        return None
     except Exception as e:
-        print(f"[EXCEPTION] {symbol} → {e}")
-    return None
-
-def get_data(symbol):
-    try:
-        future = executor.submit(_fetch_kucoin, symbol)
-        return future.result(timeout=15)
-    except Exception as e:
-        print(f"[TIMEOUT/ERROR] {symbol} → {e}")
+        log.info(f"[EXCEPTION] {symbol} → {e}")
+        time.sleep(0.1)
         return None
 
 # === ІНДИКАТОРИ ===
@@ -101,7 +101,8 @@ def rsi(c):
 
 def macd(c):
     if len(c) < 26: return 0, 0
-    e12 = sum(c[-12:])/12; e26 = sum(c[-26:])/26
+    e12 = sum(c[-12:])/12
+    e26 = sum(c[-26:])/26
     return e12 - e26, 0
 
 def bb(c):
@@ -124,9 +125,12 @@ def vwap(h, l, c, v):
     tp = [(h[i]+l[i]+c[i])/3 for i in range(len(c))]
     return sum(t*v[i] for i,t in enumerate(tp)) / sum(v) if sum(v) > 0 else c[-1]
 
-# === ГЕНЕРАЦІЯ СИГНАЛУ ===
+# === ГЕНЕРАЦІЯ НАЙКРАЩОГО СИГНАЛУ ===
 def generate_signal():
     global last_no_signal
+    best_signal = None
+    best_probability = 0
+
     for sym in SYMBOLS:
         data = get_data(sym)
         if not data: continue
@@ -150,54 +154,48 @@ def generate_signal():
         probability = max(0, (confirmations / 5) * 100)
         coin = sym.split('-')[0]
 
-        if probability >= 60 and m > ms:
-            tp = ub
-            sl = lb * 0.98
-            return f"{coin} Long, {probability}%, RSI {r:.1f}\nТВХ {price:.4f}\nTP {tp:.4f}\nSL {sl:.4f}"
-        
-        if probability >= 60 and m < ms:
-            tp = lb
-            sl = ub * 1.02
-            return f"{coin} Short, {probability}%, RSI {r:.1f}\nТВХ {price:.4f}\nTP {tp:.4f}\nSL {sl:.4f}"
-    
+        if probability > best_probability:
+            direction = "Long" if m > ms else "Short"
+            tp = ub if direction == "Long" else lb
+            sl = lb * 0.98 if direction == "Long" else ub * 1.02
+            best_signal = f"{coin} {direction}, {probability:.0f}%, RSI {r:.1f}\nТВХ {price:.4f}\nTP {tp:.4f}\nSL {sl:.4f}"
+            best_probability = probability
+
+    if best_signal and best_probability >= 60:
+        return best_signal
+
     return None
 
 # === МОНІТОРИНГ ===
 def monitor():
     global last_no_signal
     last_no_signal = time.time()
-    print(f"[{datetime.now().strftime('%H:%M')}] МОНІТОРИНГ ЗАПУЩЕНО")
+    log.info("МОНІТОРИНГ ЗАПУЩЕНО")
     
-    print(f"[{datetime.now().strftime('%H:%M')}] ТЕСТ API KUCOIN...")
-    test_data = get_data('FARTCOIN-USDT')
-    if test_data:
-        print(f"[TEST OK] Отримано {len(test_data[0])} свічок | Ціна: {test_data[0][-1]:.6f}")
-    else:
-        print("[TEST FAILED] Немає даних з KuCoin")
-
-    print(f"[{datetime.now().strftime('%H:%M')}] ПЕРШИЙ СКАН...")
-    sig = generate_signal()
-    if sig:
-        bot.send_message(CHAT_ID, sig)
-        print(f"Відправлено: {sig}")
-    else:
-        print("Сигналів немає на старті")
-
     while True:
         try:
+            now_kyiv = datetime.now(KYIV_TZ)
+            hour = now_kyiv.hour
+
+            # Робота тільки з 9:00 до 22:00 по Києву
+            if not (9 <= hour < 22):
+                print(f"[{now_kyiv.strftime('%H:%M')}] Поза робочим часом (9-22 Київ)")
+                time.sleep(300)  # чекаємо 5 хв
+                continue
+
             now = time.time()
             sig = generate_signal()
             if sig:
                 bot.send_message(CHAT_ID, sig)
-                print(f"Відправлено: {sig}")
+                log.info(f"Відправлено: {sig}")
                 last_no_signal = now
             else:
                 if now - last_no_signal >= NO_SIGNAL_INTERVAL:
                     bot.send_message(CHAT_ID, "Сигналів немає")
-                    print("Відправлено: Сигналів немає")
+                    log.info("Відправлено: Сигналів немає")
                     last_no_signal = now
         except Exception as e:
-            print(f"[MONITOR ERROR] {e}")
+            log.error(f"[MONITOR ERROR] {e}")
         time.sleep(INTERVAL)
 
 # === WEBHOOK ===
@@ -207,10 +205,9 @@ def webhook():
         json_string = request.get_data().decode('utf-8')
         update = telebot.types.Update.de_json(json_string)
         bot.process_new_updates([update])
-        print(f"[WEBHOOK] Отримано update")
         return '', 200
     except Exception as e:
-        print(f"[WEBHOOK ERROR] {e}")
+        log.error(f"[WEBHOOK ERROR] {e}")
         return 'Error', 500
 
 @app.route('/')
@@ -228,21 +225,21 @@ if __name__ == '__main__':
     try:
         bot.remove_webhook()
         time.sleep(2)
-        print("Старий webhook видалено")
+        log.info("Старий webhook видалено")
     except Exception as e:
-        print(f"Помилка видалення webhook: {e}")
+        log.error(f"Помилка видалення webhook: {e}")
 
     try:
         success = bot.set_webhook(url=WEBHOOK_URL)
         if success:
-            print(f"Webhook встановлено: {WEBHOOK_URL}")
+            log.info(f"Webhook встановлено: {WEBHOOK_URL}")
         else:
-            print("ПОМИЛКА: set_webhook повернув False")
+            log.error("ПОМИЛКА: set_webhook повернув False")
     except Exception as e:
-        print(f"ПОМИЛКА webhook: {e}")
+        log.error(f"ПОМИЛКА webhook: {e}")
 
     Thread(target=monitor, daemon=True).start()
-    print("Моніторинг запущено")
+    log.info("Моніторинг запущено")
 
-    print("Flask сервер запущено")
+    log.info("Flask сервер запущено")
     app.run(host='0.0.0.0', port=10000, debug=False)
