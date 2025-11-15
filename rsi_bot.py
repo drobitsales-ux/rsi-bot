@@ -10,7 +10,7 @@ from threading import Thread
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
-# === ЛОГУВАННЯ (тепер все видно в Render Logs) ===
+# === ЛОГУВАННЯ (все видно в Render Logs) ===
 logging.basicConfig(level=logging.INFO, format='%(asctime)s | %(message)s')
 log = logging.getLogger(__name__)
 
@@ -41,13 +41,14 @@ INTERVAL = 900  # 15 хвилин
 NO_SIGNAL_INTERVAL = 3600  # 1 година
 last_no_signal = 0
 
-# === ДАНІ З KUCOIN (з таймаутом + логуванням) ===
+# === СЕСІЯ З РЕТРАЄМ ===
 session = requests.Session()
 retry = Retry(total=3, backoff_factor=1, status_forcelist=[429, 500, 502, 503, 504])
 adapter = HTTPAdapter(max_retries=retry)
 session.mount('http://', adapter)
 session.mount('https://', adapter)
 
+# === ОТРИМАННЯ ДАНИХ З KUCOIN ===
 def get_data(symbol):
     url = "https://api.kucoin.com/api/v1/market/candles"
     params = {
@@ -125,7 +126,7 @@ def vwap(h, l, c, v):
     tp = [(h[i]+l[i]+c[i])/3 for i in range(len(c))]
     return sum(t*v[i] for i,t in enumerate(tp)) / sum(v) if sum(v) > 0 else c[-1]
 
-# === ГЕНЕРАЦІЯ НАЙКРАЩОГО СИГНАЛУ ===
+# === ГЕНЕРАЦІЯ НАЙКРАЩОГО СИГНАЛУ (RSI ≤32 / ≥68) ===
 def generate_signal():
     global last_no_signal
     best_signal = None
@@ -133,7 +134,9 @@ def generate_signal():
 
     for sym in SYMBOLS:
         data = get_data(sym)
-        if not data: continue
+        if not data: 
+            continue
+            
         c, h, l, v = data
         price = c[-1]
         r = rsi(c)
@@ -143,30 +146,55 @@ def generate_signal():
         vs = vol_spike(v)
         vw = vwap(h, l, c, v)
 
+        # Базові підтвердження
         confirmations = 0
-        if m > ms: confirmations += 1
-        if m < ms: confirmations += 1
-        if price <= lb or price >= ub: confirmations += 1
-        if sk < 35 or sk > 65: confirmations += 1
-        if vs > 1.0: confirmations += 1
-        if price <= vw or price >= vw: confirmations += 1
+        direction = None
 
-        probability = max(0, (confirmations / 5) * 100)
+        # RSI — СУВОРИЙ ФІЛЬТР
+        if r <= 32:  # Перепроданність
+            confirmations += 2
+            direction = "Long"
+        elif r >= 68:  # Перекупленість
+            confirmations += 2
+            direction = "Short"
+        else:
+            continue  # RSI не в зоні — пропускаємо пару
+
+        # Додаткові підтвердження
+        if direction == "Long":
+            if m > ms: confirmations += 1
+            if price <= lb: confirmations += 1
+            if sk < 35: confirmations += 1
+            if vs > 1.5: confirmations += 1
+            if abs(price - vw) / price < 0.003: confirmations += 1
+        else:  # Short
+            if m < ms: confirmations += 1
+            if price >= ub: confirmations += 1
+            if sk > 65: confirmations += 1
+            if vs > 1.5: confirmations += 1
+            if abs(price - vw) / price < 0.003: confirmations += 1
+
+        probability = min(100, (confirmations / 8) * 100)  # 8 критеріїв
         coin = sym.split('-')[0]
 
         if probability > best_probability:
-            direction = "Long" if m > ms else "Short"
             tp = ub if direction == "Long" else lb
             sl = lb * 0.98 if direction == "Long" else ub * 1.02
-            best_signal = f"{coin} {direction}, {probability:.0f}%, RSI {r:.1f}\nТВХ {price:.4f}\nTP {tp:.4f}\nSL {sl:.4f}"
+            best_signal = (
+                f"**{coin} {direction}** | `{probability:.0f}%`\n"
+                f"RSI: `{r:.1f}` | Stoch: `{sk:.1f}`\n"
+                f"ТВХ: `{price:.6f}`\n"
+                f"TP: `{tp:.6f}` | SL: `{sl:.6f}`\n"
+                f"Час: `{datetime.now(KYIV_TZ).strftime('%H:%M')}`"
+            )
             best_probability = probability
 
-    if best_signal and best_probability >= 60:
+    if best_signal and best_probability >= 65:
         return best_signal
 
     return None
 
-# === МОНІТОРИНГ ===
+# === МОНІТОРИНГ (9:00–22:00 Київ) ===
 def monitor():
     global last_no_signal
     last_no_signal = time.time()
@@ -179,14 +207,14 @@ def monitor():
 
             # Робота тільки з 9:00 до 22:00 по Києву
             if not (9 <= hour < 22):
-                print(f"[{now_kyiv.strftime('%H:%M')}] Поза робочим часом (9-22 Київ)")
-                time.sleep(300)  # чекаємо 5 хв
+                log.info(f"[{now_kyiv.strftime('%H:%M')}] Поза робочим часом (9-22 Київ)")
+                time.sleep(300)
                 continue
 
             now = time.time()
             sig = generate_signal()
             if sig:
-                bot.send_message(CHAT_ID, sig)
+                bot.send_message(CHAT_ID, sig, parse_mode='Markdown')
                 log.info(f"Відправлено: {sig}")
                 last_no_signal = now
             else:
@@ -218,7 +246,7 @@ def index():
 @bot.message_handler(commands=['signal'])
 def cmd_signal(m):
     sig = generate_signal()
-    bot.reply_to(m, sig or "Сигналів немає")
+    bot.reply_to(m, sig or "Сигналів немає", parse_mode='Markdown')
 
 # === ЗАПУСК ===
 if __name__ == '__main__':
